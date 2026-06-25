@@ -1,11 +1,38 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
+import api from "../services/axios";
+import { ThreeDots } from "react-loader-spinner";
+import { toast } from "sonner";
+import { useForm, useWatch } from "react-hook-form";
+import { useNavigate } from "react-router-dom";
 
 const passwordRules = [
   "At least 8 characters",
   "One uppercase letter",
   "One number or symbol",
 ];
+
+const signupMessages = {
+  "Email is required": "Email address is required.",
+  "Please enter a valid Gmail address.": "Please enter a valid Gmail address.",
+  "The email domain does not exist or cannot receive mail.":
+    "This email address cannot receive mail. Please enter a valid email address.",
+  "Email address format is rejected by the mail server.":
+    "Please enter a valid email address.",
+  "The recipient address was rejected by the mail server relay.":
+    "This email address cannot receive mail. Please use another email address.",
+  "OTP sent successfully": "OTP sent successfully.",
+  "Failed to send OTP due to a server error.":
+    "Unable to send OTP right now. Please try again later.",
+  "Email already exists": "An account with this email already exists.",
+  "This email is already registered": "This email is already registered",
+};
+
+const getSignupMessage = (message, fallback) => {
+  if (!message) return fallback;
+  return signupMessages[message] || message;
+};
 
 function SocialButton({ provider, label, onClick }) {
   const markColor = provider === "google" ? "bg-[#ea4335]" : "bg-[#1877f2]";
@@ -31,8 +58,8 @@ function Field({
   id,
   label,
   type = "text",
-  value,
-  onChange,
+  error,
+  registration,
   placeholder,
   autoComplete,
 }) {
@@ -43,30 +70,49 @@ function Field({
     >
       <span>{label}</span>
       <input
-        className="min-h-12 w-full rounded-lg border border-[#d3dde4] bg-white px-3.5 text-[#17202a] outline-none transition focus:border-[#1c7c72] focus:shadow-[0_0_0_4px_rgba(28,124,114,0.13)]"
+        className={`min-h-12 w-full rounded-lg border bg-white px-3.5 text-[#17202a] outline-none transition focus:border-[#1c7c72] focus:shadow-[0_0_0_4px_rgba(28,124,114,0.13)] ${
+          error ? "border-[#d64545]" : "border-[#d3dde4]"
+        }`}
         id={id}
         type={type}
-        value={value}
-        onChange={onChange}
         placeholder={placeholder}
         autoComplete={autoComplete}
-        required
+        aria-invalid={error ? "true" : "false"}
+        {...registration}
       />
+      {error ? (
+        <span className="text-[0.82rem] font-bold text-[#b42318]">
+          {error.message}
+        </span>
+      ) : null}
     </label>
   );
 }
 
 export default function Signup() {
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    password: "",
-    terms: false,
+  const TimeoutRef = useRef(null);
+  const TimetakenRef = useRef(null);
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    control,
+    setError,
+    formState: { errors },
+  } = useForm({
+    defaultValues: {
+      name: "",
+      email: "",
+      password: "",
+      terms: false,
+    },
   });
+  const password = useWatch({ control, name: "password" }) || "";
 
   const passwordStrength = useMemo(() => {
-    const password = formData.password;
     const checks = [
       password.length >= 8,
       /[A-Z]/.test(password),
@@ -74,16 +120,88 @@ export default function Signup() {
     ];
 
     return checks.filter(Boolean).length;
-  }, [formData.password]);
+  }, [password]);
 
-  function updateField(field, value) {
-    setFormData((current) => ({ ...current, [field]: value }));
-  }
+  const handleregisteration = async (data) => {
+    if (loading) return;
 
-  function handleSubmit(event) {
-    event.preventDefault();
-    console.log("signup form submitted", formData);
-  }
+    let shouldResetForm = false;
+    const email = data.email.trim().toLowerCase();
+
+    TimeoutRef.current = setTimeout(() => {
+      TimetakenRef.current = Date.now();
+      setLoading(true);
+    }, 300);
+
+    try {
+      const response = await api.post("email/sendOtp", {
+        name: data.name,
+        email,
+        password: data.password,
+      });
+
+      if (
+        response.status === 200 &&
+        response.data?.message === "OTP sent successfully"
+      ) {
+        const message = getSignupMessage(
+          response.data?.message,
+          "OTP sent successfully.",
+        );
+        toast.success(message, {
+          position: "top-center",
+        });
+        console.log("success response:", response.data);
+        sessionStorage.setItem("email", email);
+        shouldResetForm = true;
+        navigate("/signup/verifyotp", {
+          replace: true,
+          state: { email },
+        });
+      } else {
+        const message = getSignupMessage(
+          response.data?.message,
+          "Unable to send OTP. Please try again.",
+        );
+        setError("email", { type: "server", message });
+        toast.error(message, { position: "top-center" });
+      }
+    } catch (error) {
+      console.error("Registration failed:", error);
+      if (error.response) {
+        const message = getSignupMessage(
+          error.response.data?.message,
+          error.response.status >= 500
+            ? "Unable to send OTP right now. Please try again later."
+            : "Please enter a valid email address.",
+        );
+        setError("email", { type: "server", message });
+        toast.error(message, { position: "top-center" });
+      } else {
+        toast.error("Unable to connect. Please try again.", {
+          position: "top-center",
+        });
+      }
+    } finally {
+      clearTimeout(TimeoutRef.current);
+
+      if (TimetakenRef.current) {
+        const timeTaken = Date.now() - TimetakenRef.current;
+        const minimumLoadingTime = 400;
+
+        if (timeTaken < minimumLoadingTime) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, minimumLoadingTime - timeTaken),
+          );
+        }
+      }
+    }
+    setLoading(false);
+    TimetakenRef.current = null;
+    if (shouldResetForm) {
+      reset();
+    }
+  };
 
   function handleSocialAuth(provider) {
     console.log(`${provider} signup selected`);
@@ -99,7 +217,7 @@ export default function Signup() {
           className="mb-6 inline-flex items-center gap-2 text-sm font-black text-[#1c7c72] no-underline"
           to="/"
         >
-          Back to home
+          <ArrowLeft className="size-4" aria-hidden="true" />
         </Link>
 
         <div
@@ -150,12 +268,24 @@ export default function Signup() {
           <span>or use email</span>
         </div>
 
-        <form className="grid gap-[18px]" onSubmit={handleSubmit}>
+        <form
+          className="grid gap-[18px]"
+          noValidate
+          onSubmit={(event) => {
+            void handleSubmit(handleregisteration)(event);
+          }}
+        >
           <Field
             id="name"
             label="Full name"
-            value={formData.name}
-            onChange={(event) => updateField("name", event.target.value)}
+            error={errors.name}
+            registration={register("name", {
+              required: "Full name is required",
+              minLength: {
+                value: 2,
+                message: "Name must be at least 2 characters",
+              },
+            })}
             placeholder="Your name"
             autoComplete="name"
           />
@@ -164,8 +294,14 @@ export default function Signup() {
             id="email"
             label="Email address"
             type="email"
-            value={formData.email}
-            onChange={(event) => updateField("email", event.target.value)}
+            error={errors.email}
+            registration={register("email", {
+              required: "Email address is required",
+              pattern: {
+                value: /^[^\s@]+@gmail\.com$/i,
+                message: "Enter a valid Gmail address",
+              },
+            })}
             placeholder="you@example.com"
             autoComplete="email"
           />
@@ -177,16 +313,29 @@ export default function Signup() {
             <span>Password</span>
             <div className="relative">
               <input
-                className="min-h-12 w-full rounded-lg border border-[#d3dde4] bg-white px-3.5 pr-[72px] text-[#17202a] outline-none transition focus:border-[#1c7c72] focus:shadow-[0_0_0_4px_rgba(28,124,114,0.13)]"
+                className={`min-h-12 w-full rounded-lg border bg-white px-3.5 pr-[72px] text-[#17202a] outline-none transition focus:border-[#1c7c72] focus:shadow-[0_0_0_4px_rgba(28,124,114,0.13)] ${
+                  errors.password ? "border-[#d64545]" : "border-[#d3dde4]"
+                }`}
                 id="password"
                 type={showPassword ? "text" : "password"}
-                value={formData.password}
-                onChange={(event) =>
-                  updateField("password", event.target.value)
-                }
                 placeholder="Create a strong password"
                 autoComplete="new-password"
-                required
+                aria-invalid={errors.password ? "true" : "false"}
+                {...register("password", {
+                  required: "Password is required",
+                  minLength: {
+                    value: 8,
+                    message: "Password must be at least 8 characters",
+                  },
+                  validate: {
+                    uppercase: (value) =>
+                      /[A-Z]/.test(value) ||
+                      "Password needs one uppercase letter",
+                    numberOrSymbol: (value) =>
+                      /[\d\W]/.test(value) ||
+                      "Password needs one number or symbol",
+                  },
+                })}
               />
               <button
                 type="button"
@@ -196,6 +345,11 @@ export default function Signup() {
                 {showPassword ? "Hide" : "Show"}
               </button>
             </div>
+            {errors.password ? (
+              <span className="text-[0.82rem] font-bold text-[#b42318]">
+                {errors.password.message}
+              </span>
+            ) : null}
           </label>
 
           <div className="grid gap-2" aria-label="Password strength">
@@ -220,19 +374,42 @@ export default function Signup() {
               <input
                 className="mt-0 h-[18px] w-[18px] accent-[#1c7c72]"
                 type="checkbox"
-                checked={formData.terms}
-                onChange={(event) => updateField("terms", event.target.checked)}
-                required
+                aria-invalid={errors.terms ? "true" : "false"}
+                {...register("terms", {
+                  required: "You must agree before signing up",
+                })}
               />
               <span>I agree to the terms and privacy policy</span>
             </label>
+            {errors.terms ? (
+              <span className="text-[0.82rem] font-bold text-[#b42318]">
+                {errors.terms.message}
+              </span>
+            ) : null}
           </div>
 
           <button
             className="min-h-[52px] cursor-pointer rounded-lg border-0 bg-[#1c7c72] font-black text-white transition hover:-translate-y-px hover:bg-[#15655d] hover:shadow-[0_12px_28px_rgba(29,56,73,0.14)]"
             type="submit"
+            disabled={loading}
           >
-            Create account
+            {loading ? (
+              <div className="flex items-center justify-center">
+                <p className="mr-2">Registering</p>
+                <ThreeDots
+                  visible={true}
+                  height="40"
+                  width="40"
+                  color="#4fa94d"
+                  radius="9"
+                  ariaLabel="three-dots-loading"
+                  wrapperStyle={{}}
+                  wrapperClass=""
+                />
+              </div>
+            ) : (
+              "Signup"
+            )}
           </button>
         </form>
 

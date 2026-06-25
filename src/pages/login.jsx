@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 
 function SocialButton({ provider, label, onClick }) {
   const markColor = provider === "google" ? "bg-[#ea4335]" : "bg-[#1877f2]";
@@ -81,7 +82,7 @@ export default function Login() {
           className="mb-6 inline-flex items-center gap-2 text-sm font-black text-[#1c7c72] no-underline"
           to="/"
         >
-          Back to home
+          <ArrowLeft className="size-4" aria-hidden="true" />
         </Link>
 
         <div

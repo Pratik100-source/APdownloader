@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, MailCheck, RefreshCw, ShieldCheck } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import api from "../services/axios";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -8,30 +10,96 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
+import { toast } from "sonner";
 
 const optregex = /^[0-9]+$/;
+
+const otpMessages = {
+  "otp not provided": "Enter the 6 digit code to continue.",
+  "OTP data not found for the provided email":
+    "Your verification code has expired. Please request a new code.",
+  "Otp didn't match": "The OTP you entered is incorrect.",
+  "Failed to verify otp": "Unable to verify OTP right now. Please try again.",
+  "Successfully verified": "Successfully verified.",
+};
+
+const getOtpMessage = (message, fallback) => {
+  if (!message) return fallback;
+  return otpMessages[message] || message;
+};
 
 function VerifyOtp() {
   const [otp, setOtp] = useState("");
   const [message, setMessage] = useState("");
+  const navigate = useNavigate();
 
-  const isComplete = useMemo(() => otp.length === 4, [otp]);
+  const isComplete = useMemo(() => otp.length === 6, [otp]);
+  const email = sessionStorage.getItem("email");
 
-  function handleSubmit(event) {
+  const handleSubmit = async (event) => {
     event.preventDefault();
+    setMessage("");
 
     if (!isComplete) {
-      setMessage("Enter the 4 digit code to continue.");
+      const message = "Enter the 6 digit code to continue.";
+      setMessage(message);
+      toast.error(message, { position: "top-center" });
       return;
     }
 
-    setMessage("OTP ready to verify. Connect this to your API next.");
-  }
+    if (!email) {
+      const message = "Email not found. Please go back and try again.";
+      setMessage(message);
+      toast.error(message, { position: "top-center" });
+      return;
+    }
 
-  function handleResend() {
+    try {
+      const response = await api.post("email/verifyOtp", { email, otp });
+      const successMessage = getOtpMessage(
+        response.data?.message,
+        "Successfully verified.",
+      );
+
+      toast.success(successMessage, { position: "top-center" });
+      console.log("successfully verified");
+      navigate("/login", { replace: true });
+    } catch (error) {
+      console.error("Failed to verify OTP:", error);
+      const errorMessage = getOtpMessage(
+        error.response?.data?.message,
+        error.response?.status >= 500
+          ? "Unable to verify OTP right now. Please try again."
+          : "The OTP you entered is incorrect.",
+      );
+
+      setMessage(errorMessage);
+      toast.error(errorMessage, { position: "top-center" });
+    }
+  };
+
+  const handleResend = async () => {
     setOtp("");
-    setMessage("A fresh code has been sent to your email.");
-  }
+
+    if (!email) {
+      setMessage("Email not found. Please go back and try again.");
+      return;
+    }
+
+    try {
+      const response = await api.post("email/resendOtp", { email });
+      if (response.status === 200) {
+        const message = "A fresh code has been sent to your email.";
+        setMessage(message);
+        toast.success(message, { position: "top-center" });
+      }
+    } catch (error) {
+      console.error("Failed to resend OTP:", error);
+      const message = "Failed to resend OTP. Please try again.";
+      setMessage(message);
+      toast.error(message, { position: "top-center" });
+    }
+  };
 
   return (
     <main className="grid min-h-screen place-items-center bg-[linear-gradient(135deg,#f7fbff_0%,#eef7f4_50%,#fff5ec_100%)] px-4 py-10 font-sans text-[#17202a]">
@@ -65,14 +133,14 @@ function VerifyOtp() {
         </div>
 
         <p className="mb-7 leading-[1.55] text-[#637180]">
-          Enter the 4 digit code we sent to your email address to finish setting
+          Enter the 6 digit code we sent to your email address to finish setting
           up your account.
         </p>
 
         <form className="grid gap-6" onSubmit={handleSubmit}>
           <div className="grid justify-items-center gap-3">
             <InputOTP
-              maxLength={4}
+              maxLength={6}
               pattern={optregex}
               value={otp}
               onChange={setOtp}
@@ -96,6 +164,14 @@ function VerifyOtp() {
                   index={3}
                   className="size-14 rounded-lg border border-[#d3dde4] bg-white text-xl text-[#132d40] shadow-[0_8px_22px_rgba(29,56,73,0.08)] first:rounded-lg first:border last:rounded-lg data-[active=true]:border-[#1c7c72] data-[active=true]:ring-[#1c7c72]/20"
                 />
+                <InputOTPSlot
+                  index={4}
+                  className="size-14 rounded-lg border border-[#d3dde4] bg-white text-xl text-[#132d40] shadow-[0_8px_22px_rgba(29,56,73,0.08)] first:rounded-lg first:border last:rounded-lg data-[active=true]:border-[#1c7c72] data-[active=true]:ring-[#1c7c72]/20"
+                />
+                <InputOTPSlot
+                  index={5}
+                  className="size-14 rounded-lg border border-[#d3dde4] bg-white text-xl text-[#132d40] shadow-[0_8px_22px_rgba(29,56,73,0.08)] first:rounded-lg first:border last:rounded-lg data-[active=true]:border-[#1c7c72] data-[active=true]:ring-[#1c7c72]/20"
+                />
               </InputOTPGroup>
             </InputOTP>
 
@@ -104,7 +180,7 @@ function VerifyOtp() {
                 className="size-4 text-[#1c7c72]"
                 aria-hidden="true"
               />
-              <span>Codes expire after 10 minutes.</span>
+              <span>Codes expire after 5 minutes.</span>
             </div>
           </div>
 
