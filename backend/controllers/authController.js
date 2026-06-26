@@ -1,5 +1,5 @@
 const User = require("../models/users");
-// const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 const registerUser = async (req, res) => {
   const { name, email, password } = req.body;
@@ -30,4 +30,46 @@ const registerUser = async (req, res) => {
   }
 };
 
-module.exports = { registerUser };
+const loginUser = async (req, res) => {
+  const { email, password, rememberme } = req.body;
+
+  try {
+    if (!email) {
+      res.status(400).json({
+        message: "Please enter the email first",
+      });
+    }
+
+    if (!password) {
+      res.status(400).json({
+        message: "Please enter the password first",
+      });
+    }
+
+    const userData = await User.findOne({ email: email });
+    console.log(userData);
+    console.log(password);
+    console.log(email);
+    console.log(rememberme);
+    console.log(userData.password);
+    if (!userData) {
+      console.log("No such user found");
+      res.status(404).json({
+        message: "Either password or email doesn't match",
+      });
+    }
+    const hashedPassword = userData.password;
+    const isMatch = await bcrypt.compare(password, hashedPassword);
+
+    if (!isMatch) {
+      res.status(404).json("Either password or email doesn't match");
+    }
+    return res.status(200).json({
+      message: "Succesfully logged in",
+    });
+  } catch (error) {
+    console.log(error);
+  }
+};
+
+module.exports = { registerUser, loginUser };
